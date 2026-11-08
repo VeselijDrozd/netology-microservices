@@ -63,3 +63,57 @@
 |---|---|---|
 | API Gateway | **NGINX** | Закрывает routing + auth + TLS, просто эксплуатировать |
 | Брокер сообщений | **RabbitMQ** | Надёжность и ACL при более простой эксплуатации, чем у Kafka |
+
+---
+
+## Задача 3: API Gateway на практике
+
+Каркас сервисов (`security`, `uploader`, MinIO) и `docker-compose` взяты из материалов Нетологии:
+
+https://github.com/netology-code/devkub-homeworks/tree/main/11-microservices-02-principles
+
+Реализация gateway — конфиг `gateway/nginx.conf`.
+
+### Маршруты
+
+| Внешний путь | Auth | Куда |
+|---|---|---|
+| `POST /token` | нет | `security` → `POST /v1/token` |
+| `POST /register` | нет | `security` → `POST /v1/user` |
+| `GET /user` | да (`auth_request`) | `security` → `GET /v1/user` |
+| `POST /upload` | да (`auth_request`) | `uploader` → `POST /v1/upload` |
+| `GET /images/{file}` | нет* | MinIO → `/data/{file}` |
+
+\*В условии задания для картинок указана проверка токена, но в проверочных `curl` из readme Нетологии `Authorization` не передаётся, бакет открыт политикой `download` — поэтому `/images/` отдаётся без `auth_request`.
+
+Проверка токена: внутренний `location = /_auth` ходит в `GET /v1/token/validation` сервиса `security`. Nginx `auth_request` пропускает основной запрос только при ответе 2xx.
+
+### Запуск
+
+```bash
+docker compose up --build
+```
+
+### Проверка
+
+```bash
+# логин → JWT
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"login":"bob","password":"qwe123"}' \
+  http://localhost/token
+
+# загрузка (подставить токен из ответа выше)
+curl -X POST \
+  -H 'Authorization: Bearer <TOKEN>' \
+  -H 'Content-Type: octet/stream' \
+  --data-binary @1.jpg \
+  http://localhost/upload
+# → {"filename":"<uuid>.jpg"}
+
+# скачивание
+curl -o out.jpg http://localhost/images/<uuid>.jpg
+```
+
+### Замечание по образам MinIO
+
+Официальные `minio/minio` и `minio/mc` сняты с Docker Hub (source-only). В `docker-compose.yaml` для локального ДЗ используются community-сборки `netvark/minio` и `netvark/mc`. У `security` дополнительно закреплены совместимые версии Jinja2/Werkzeug под старый Flask из каркаса.
