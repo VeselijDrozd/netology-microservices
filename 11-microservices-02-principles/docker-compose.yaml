@@ -2,6 +2,7 @@ volumes:
   data:
   prometheus-data:
   grafana_data:
+  elasticsearch-data:
 
 services:
   # Официальные minio/minio и minio/mc сняты с Docker Hub (source-only).
@@ -64,8 +65,117 @@ services:
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "80:8080"      
+      - "80:8080"
     depends_on:
       - storage
       - uploader
       - security
+
+  # --- Задача 4 (логи): Vector + Elasticsearch + Kibana ---
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.21
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    expose:
+      - 9200
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.21
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - ./logging/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    expose:
+      - 5601
+
+  # Внешний вход http://localhost:8081 с логином admin / qwerty123456
+  kibana-proxy:
+    image: nginx:alpine
+    depends_on:
+      - kibana
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./logging/kibana-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./logging/kibana-proxy/htpasswd:/etc/nginx/htpasswd:ro
+
+  kibana-init:
+    image: curlimages/curl:8.5.0
+    depends_on:
+      - kibana
+    volumes:
+      - ./logging/kibana-init.sh:/kibana-init.sh:ro
+    entrypoint: ["/bin/sh", "/kibana-init.sh"]
+    restart: on-failure
+
+  vector:
+    image: timberio/vector:0.34.1-alpine
+    user: root
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      gateway:
+        condition: service_started
+      security:
+        condition: service_started
+      uploader:
+        condition: service_started
+      storage:
+        condition: service_started
+    volumes:
+      - ./logging/vector.toml:/etc/vector/vector.toml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["--config", "/etc/vector/vector.toml"]
+    restart: unless-stopped
+
+  # --- Задача 5 (мониторинг): Prometheus + Grafana ---
+  # Порты разведены с Kibana: Grafana → :8082, Kibana → :8081
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    expose:
+      - 9090
+    depends_on:
+      - security
+      - uploader
+      - storage
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: qwerty123456
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:8082
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/api-requests.json
+    ports:
+      - "8082:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped

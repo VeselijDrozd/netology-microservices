@@ -1,0 +1,52 @@
+# Сбор stdout/stderr контейнеров API-контура → Elasticsearch
+
+data_dir = "/var/lib/vector"
+
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+[sources.docker_logs]
+type = "docker_logs"
+exclude_containers = [
+  "vector",
+  "elasticsearch",
+  "kibana",
+  "kibana-proxy",
+  "createbuckets",
+]
+
+[transforms.only_api]
+type = "filter"
+inputs = ["docker_logs"]
+condition = '''
+  contains(string!(.container_name), "security") ||
+  contains(string!(.container_name), "uploader") ||
+  contains(string!(.container_name), "-gateway-") ||
+  contains(string!(.container_name), "-storage-")
+'''
+
+# Убираем docker labels — они ломают mapping в Elasticsearch
+[transforms.parse_docker]
+type = "remap"
+inputs = ["only_api"]
+source = '''
+. = {
+  "timestamp": .timestamp,
+  "message": string!(.message),
+  "container_name": string!(.container_name),
+  "container_id": string!(.container_id),
+  "image": string!(.image),
+  "stream": string!(.stream),
+  "service": string!(.container_name)
+}
+'''
+
+[sinks.elasticsearch]
+type = "elasticsearch"
+inputs = ["parse_docker"]
+endpoints = ["http://elasticsearch:9200"]
+mode = "bulk"
+bulk.index = "api-logs"
+api_version = "v7"
+healthcheck.enabled = true

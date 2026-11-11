@@ -117,3 +117,52 @@ curl -o out.jpg http://localhost/images/<uuid>.jpg
 ### Замечание по образам MinIO
 
 Официальные `minio/minio` и `minio/mc` сняты с Docker Hub (source-only). В `docker-compose.yaml` для локального ДЗ используются community-сборки `netvark/minio` и `netvark/mc`. У `security` дополнительно закреплены совместимые версии Jinja2/Werkzeug под старый Flask из каркаса.
+
+---
+
+## Логи (задача 4 из «подходы»)
+
+В этот же `docker-compose` добавлены **Vector + Elasticsearch + Kibana**:
+
+```text
+stdout (gateway/security/uploader/storage)
+  → Vector (/var/run/docker.sock)
+  → Elasticsearch (индекс api-logs)
+  → Kibana ← kibana-proxy :8081
+```
+
+- UI: http://localhost:8081  
+- Логин / пароль: `admin` / `qwerty123456`  
+- Конфиг Vector: `logging/vector.toml`  
+- Index pattern: `api-logs*` (создаётся автоматически)  
+- Dashboard в Kibana: **Dashboard → API Logs**  
+- Сырые логи: **Discover** (не Security / Fleet — их можно игнорировать)
+
+## Мониторинг (задача 5 из «подходы»)
+
+Добавлены **Prometheus + Grafana**:
+
+```text
+security:/metrics
+uploader:/metrics
+storage:/minio/v2/metrics/cluster
+        ↓ scrape
+   Prometheus
+        ↓
+    Grafana :8082
+```
+
+- UI: http://localhost:8082  
+- Логин / пароль: `admin` / `qwerty123456`  
+- Dashboard: **API: распределение запросов по сервисам**  
+- Конфиги: `monitoring/`
+
+### Порты UI
+
+| Сервис | Порт | Учётка |
+|---|---|---|
+| API Gateway | `:80` | — |
+| Kibana (логи) | `:8081` | admin / qwerty123456 |
+| Grafana (метрики) | `:8082` | admin / qwerty123456 |
+
+В условии обеих задач указан `:8081`; порты разведены, чтобы стеки работали одновременно.
