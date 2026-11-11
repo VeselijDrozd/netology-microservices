@@ -1,0 +1,222 @@
+# Redis Cluster: 3 шарда × (1 master + 2 replicas) = 9 узлов
+# --cluster-replicas 2 → у каждого master по 2 реплики
+
+x-redis-node: &redis-node
+  image: redis:7.2-alpine
+  restart: unless-stopped
+  networks:
+    redis-net: {}
+
+services:
+  redis-1:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.11
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-1-data:/data
+    ports:
+      - "7001:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.11
+
+  redis-2:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.12
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-2-data:/data
+    ports:
+      - "7002:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.12
+
+  redis-3:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.13
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-3-data:/data
+    ports:
+      - "7003:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.13
+
+  redis-4:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.14
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-4-data:/data
+    ports:
+      - "7004:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.14
+
+  redis-5:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.15
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-5-data:/data
+    ports:
+      - "7005:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.15
+
+  redis-6:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.16
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-6-data:/data
+    ports:
+      - "7006:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.16
+
+  redis-7:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.17
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-7-data:/data
+    ports:
+      - "7007:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.17
+
+  redis-8:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.18
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-8-data:/data
+    ports:
+      - "7008:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.18
+
+  redis-9:
+    <<: *redis-node
+    command: >
+      redis-server /conf/redis.conf
+      --cluster-announce-ip 172.30.0.19
+      --cluster-announce-port 6379
+      --cluster-announce-bus-port 16379
+    volumes:
+      - ./redis/redis.conf:/conf/redis.conf:ro
+      - redis-9-data:/data
+    ports:
+      - "7009:6379"
+    networks:
+      redis-net:
+        ipv4_address: 172.30.0.19
+
+  redis-cluster-init:
+    image: redis:7.2-alpine
+    depends_on:
+      - redis-1
+      - redis-2
+      - redis-3
+      - redis-4
+      - redis-5
+      - redis-6
+      - redis-7
+      - redis-8
+      - redis-9
+    networks:
+      redis-net: {}
+    restart: on-failure
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Waiting for Redis nodes..."
+        for ip in 172.30.0.11 172.30.0.12 172.30.0.13 172.30.0.14 172.30.0.15 172.30.0.16 172.30.0.17 172.30.0.18 172.30.0.19; do
+          until redis-cli -h $$ip ping | grep -q PONG; do
+            echo "  $$ip not ready"
+            sleep 1
+          done
+          echo "  $$ip OK"
+        done
+
+        if redis-cli -h 172.30.0.11 cluster info 2>/dev/null | grep -q 'cluster_state:ok'; then
+          echo "Cluster already initialized"
+          redis-cli -h 172.30.0.11 cluster nodes
+          exit 0
+        fi
+
+        echo "Creating cluster (3 masters, 2 replicas each)..."
+        redis-cli --cluster create \
+          172.30.0.11:6379 \
+          172.30.0.12:6379 \
+          172.30.0.13:6379 \
+          172.30.0.14:6379 \
+          172.30.0.15:6379 \
+          172.30.0.16:6379 \
+          172.30.0.17:6379 \
+          172.30.0.18:6379 \
+          172.30.0.19:6379 \
+          --cluster-replicas 2 \
+          --cluster-yes
+
+        echo "Cluster ready:"
+        redis-cli -h 172.30.0.11 cluster nodes
+
+networks:
+  redis-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  redis-1-data:
+  redis-2-data:
+  redis-3-data:
+  redis-4-data:
+  redis-5-data:
+  redis-6-data:
+  redis-7-data:
+  redis-8-data:
+  redis-9-data:
